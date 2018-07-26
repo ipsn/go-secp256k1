@@ -1,5 +1,6 @@
 // Copyright 2010 The Go Authors. All rights reserved.
 // Copyright 2011 ThePiachu. All rights reserved.
+// Copyright 2015 Jeffrey Wilcke, Felix Lange, Gustav Simonsson. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -42,6 +43,27 @@ import (
 extern int secp256k1_ext_scalar_mul(const secp256k1_context* ctx, const unsigned char *point, const unsigned char *scalar);
 */
 import "C"
+
+const (
+	// number of bits in a big.Word
+	wordBits = 32 << (uint64(^big.Word(0)) >> 63)
+	// number of bytes in a big.Word
+	wordBytes = wordBits / 8
+)
+
+// readBits encodes the absolute value of bigint as big-endian bytes. Callers
+// must ensure that buf has enough space. If buf is too short the result will
+// be incomplete.
+func readBits(bigint *big.Int, buf []byte) {
+	i := len(buf)
+	for _, d := range bigint.Bits() {
+		for j := 0; j < wordBytes && i > 0; j++ {
+			i--
+			buf[i] = byte(d)
+			d >>= 8
+		}
+	}
+}
 
 // This code is from https://github.com/ThePiachu/GoBit and implements
 // several Koblitz elliptic curves over prime fields.
@@ -229,11 +251,8 @@ func (BitCurve *BitCurve) ScalarMult(Bx, By *big.Int, scalar []byte) (*big.Int, 
 
 	// Do the multiplication in C, updating point.
 	point := make([]byte, 64)
-
-	blob := Bx.Bytes()
-	copy(point[32-len(blob):], blob)
-	blob = By.Bytes()
-	copy(point[64-len(blob):], blob)
+	readBits(Bx, point[:32])
+	readBits(By, point[32:])
 
 	pointPtr := (*C.uchar)(unsafe.Pointer(&point[0]))
 	scalarPtr := (*C.uchar)(unsafe.Pointer(&scalar[0]))
@@ -266,12 +285,8 @@ func (BitCurve *BitCurve) Marshal(x, y *big.Int) []byte {
 	byteLen := (BitCurve.BitSize + 7) >> 3
 	ret := make([]byte, 1+2*byteLen)
 	ret[0] = 4 // uncompressed point flag
-
-	blob := x.Bytes()
-	copy(ret[1+byteLen-len(blob):], blob)
-	blob = y.Bytes()
-	copy(ret[1+2*byteLen-len(blob):], blob)
-
+	readBits(x, ret[1:1+byteLen])
+	readBits(y, ret[1+byteLen:])
 	return ret
 }
 
